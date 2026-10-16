@@ -2,23 +2,6 @@ name: Recovery Cloud Compiler
 
 on:
   workflow_dispatch:
-    inputs:
-      MANIFEST_URL:
-        description: 'AOSP / TWRP Manifest Link'
-        required: true
-        default: 'https://github.com'
-      MANIFEST_BRANCH:
-        description: 'Manifest Branch (e.g. twrp-12.1)'
-        required: true
-        default: 'twrp-12.1'
-      DEVICE_NAME:
-        description: 'Target Device Codename'
-        required: true
-        default: 'kansas'
-      MAKEFILE_TARGET:
-        description: 'Build Target Prefix'
-        required: true
-        default: 'twrp'
 
 jobs:
   compile-recovery:
@@ -56,34 +39,34 @@ jobs:
       run: |
         mkdir workspace
         cd workspace
-        repo init --depth=1 -u ${{ inputs.MANIFEST_URL }} -b ${{ inputs.MANIFEST_BRANCH }}
+        repo init --depth=1 -u https://github.com -b twrp-12.1
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
     - name: Embed Device Tree Configuration
       uses: actions/checkout@v4
       with:
-        path: workspace/device/motorola/${{ inputs.DEVICE_NAME }}
+        path: workspace/device/motorola/kansas
 
     - name: Compile Recovery Image Target
       run: |
         cd workspace
         export ALLOW_MISSING_DEPENDENCIES=true
         . build/envsetup.sh
-        lunch ${{ inputs.MAKEFILE_TARGET }}_${{ inputs.DEVICE_NAME }}-eng
+        lunch twrp_kansas-eng
         mka recoveryimage -j$(nproc --all)
 
     - name: Extract and Rename Artifacts
       run: |
-        cd workspace/out/target/product/${{ inputs.DEVICE_NAME }}
-        mv recovery.img ${{ inputs.MAKEFILE_TARGET }}_${{ inputs.DEVICE_NAME }}_recovery.img
+        cd workspace/out/target/product/kansas
+        mv recovery.img twrp_kansas_recovery.img
         echo "BUILD_DATE=$(date +'%Y%m%d')" >> $GITHUB_ENV
 
     - name: Upload Binaries to GitHub Releases
       uses: softprops/action-gh-release@v2
       with:
-        files: workspace/out/target/product/${{ inputs.DEVICE_NAME }}/${{ inputs.MAKEFILE_TARGET }}_${{ inputs.DEVICE_NAME }}_recovery.img
+        files: workspace/out/target/product/kansas/twrp_kansas_recovery.img
         name: Custom Recovery Compilation - ${{ env.BUILD_DATE }}
-        tag_name: recovery-${{ env.BUILD_DATE }}
+        tag_name: recovery-${__{ env.BUILD_DATE }}
         body: |
           Cloud compilation output completed successfully.
           Target Architecture: Motorola Moto G 5G (kansas)
