@@ -48,7 +48,8 @@ jobs:
         mkdir -p ~/bin
         curl https://googleapis.com > ~/bin/repo
         chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
+        sudo cp ~/bin/repo /usr/bin/repo
+        sudo chmod a+x /usr/bin/repo
 
     - name: Configure Git Workspace
       run: |
