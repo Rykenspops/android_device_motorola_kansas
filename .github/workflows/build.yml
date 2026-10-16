@@ -1,14 +1,31 @@
 name: Recovery Cloud Compiler
-
+ 
 on:
   workflow_dispatch:
-
+    inputs:
+      MANIFEST_URL:
+        description: 'AOSP / TWRP Manifest Link'
+        required: true
+        default: 'https://github.com/TeamWin/android_manifest'
+      MANIFEST_BRANCH:
+        description: 'Manifest Branch (e.g. twrp-12.1)'
+        required: true
+        default: 'twrp-12.1'
+      DEVICE_NAME:
+        description: 'Target Device Codename'
+        required: true
+        default: 'kansas'
+      MAKEFILE_TARGET:
+        description: 'Build Target Prefix'
+        required: true
+        default: 'twrp'
+ 
 jobs:
   compile-recovery:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-
+ 
     steps:
     - name: Free Disk Space Engine
       uses: jlumbroso/free-disk-space@main
@@ -19,7 +36,7 @@ jobs:
         haskell: true
         large-packages: true
         swap-storage: true
-
+ 
     - name: Initialize Environment Dependencies
       run: |
         sudo apt-get update
@@ -27,46 +44,69 @@ jobs:
         sudo add-apt-repository -y universe
         sudo add-apt-repository -y multiverse
         sudo apt-get update
-        sudo apt-get install -y gperf gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip bc bison build-essential curl git git-lfs gnupg zip lz4 libncurses-dev libssl-dev python3 python3-pip rsync tmux repo
-        sudo chmod a+x /usr/bin/repo
-
+        # Install common Android build dependencies (include python3 and build-essential)
+        sudo apt-get install -y gperf gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses-dev \
+          x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc \
+          unzip bc bison build-essential python3 curl git-core
+ 
+        mkdir -p ~/bin
+        # download official repo script (use -fsSL so failures are surfaced)
+        curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
+        chmod a+x ~/bin/repo
+        # ensure ~/bin is on PATH for this job
+        export PATH="$HOME/bin:$PATH"
+        # basic validation so we fail early if the download produced HTML
+        if ! head -n 1 ~/bin/repo | grep -qE '^#!'; then
+          echo "::error::Downloaded repo script looks invalid. Contents:"
+          sed -n '1,80p' ~/bin/repo
+          exit 1
+        fi
+        # optional: show repo version
+        ~/bin/repo --version || true
+        # create system-wide symlink (optional)
+        sudo ln -sf ~/bin/repo /usr/bin/repo
+ 
     - name: Configure Git Workspace
       run: |
         git config --global user.name "Rykenspops"
         git config --global user.email "rykenspops@gmail.com"
-
+ 
     - name: Download Build Manifests
       run: |
+        if [[ "${{ github.event.inputs.MANIFEST_URL }}" == "https://github.com" || -z "${{ github.event.inputs.MANIFEST_URL }}" ]]; then
+          echo "::error::MANIFEST_URL is not set to a manifest repository. Please provide a manifest repo URL."
+          exit 1
+        fi
         mkdir workspace
         cd workspace
-        repo init --depth=1 -u https://github.com -b twrp-12.1
+        repo init --depth=1 -u ${{ github.event.inputs.MANIFEST_URL }} -b ${{ github.event.inputs.MANIFEST_BRANCH }}
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-
+ 
     - name: Embed Device Tree Configuration
       uses: actions/checkout@v4
       with:
-        path: workspace/device/motorola/kansas
-
+        path: workspace/device/motorola/${{ github.event.inputs.DEVICE_NAME }}
+ 
     - name: Compile Recovery Image Target
       run: |
         cd workspace
         export ALLOW_MISSING_DEPENDENCIES=true
         . build/envsetup.sh
-        lunch twrp_kansas-eng
+        lunch ${{ github.event.inputs.MAKEFILE_TARGET }}_${{ github.event.inputs.DEVICE_NAME }}-eng
         mka recoveryimage -j$(nproc --all)
-
+ 
     - name: Extract and Rename Artifacts
       run: |
-        cd workspace/out/target/product/kansas
-        mv recovery.img twrp_kansas_recovery.img
+        cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}
+        mv recovery.img ${{ github.event.inputs.MAKEFILE_TARGET }}_${{ github.event.inputs.DEVICE_NAME }}_recovery.img
         echo "BUILD_DATE=$(date +'%Y%m%d')" >> $GITHUB_ENV
-
+ 
     - name: Upload Binaries to GitHub Releases
       uses: softprops/action-gh-release@v2
       with:
-        files: workspace/out/target/product/kansas/twrp_kansas_recovery.img
+        files: workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.MAKEFILE_TARGET }}_${{ github.event.inputs.DEVICE_NAME }}_recovery.img
         name: Custom Recovery Compilation - ${{ env.BUILD_DATE }}
-        tag_name: recovery-${__{ env.BUILD_DATE }}
+        tag_name: recovery-${{ env.BUILD_DATE }}
         body: |
           Cloud compilation output completed successfully.
           Target Architecture: Motorola Moto G 5G (kansas)
